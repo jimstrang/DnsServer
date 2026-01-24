@@ -823,6 +823,8 @@ LIMIT @limit OFFSET @offset";
                     if (qclass is not null)
                         command.Parameters.AddWithValue("@qclass", (short)qclass);
 
+                    long rowNumber = descendingOrder ? totalEntries - offset : offset + 1;
+
                     await using (DbDataReader reader = await command.ExecuteReaderAsync())
                     {
                         while (await reader.ReadAsync())
@@ -848,7 +850,12 @@ LIMIT @limit OFFSET @offset";
                             else
                                 answer = reader.GetString(10);
 
-                            entries.Add(new DnsLogEntry(reader.GetInt64(0), reader.GetDateTime(1), IPAddress.Parse(reader.GetString(2)), (DnsTransportProtocol)reader.GetByte(3), (DnsServerResponseType)reader.GetByte(4), responseRtt, (DnsResponseCode)reader.GetByte(6), question, answer));
+                            entries.Add(new DnsLogEntry(rowNumber, reader.GetDateTime(1), IPAddress.Parse(reader.GetString(2)), (DnsTransportProtocol)reader.GetByte(3), (DnsServerResponseType)reader.GetByte(4), responseRtt, (DnsResponseCode)reader.GetByte(6), question, answer));
+
+                            if (descendingOrder)
+                                rowNumber--;
+                            else
+                                rowNumber++;
                         }
                     }
                 }
