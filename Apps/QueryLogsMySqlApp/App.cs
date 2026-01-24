@@ -768,50 +768,33 @@ CREATE TABLE IF NOT EXISTS dns_logs
                 if ((pageNumber > totalPages) || (pageNumber < 0))
                     pageNumber = totalPages;
 
-                long endRowNum;
-                long startRowNum;
-
-                if (descendingOrder)
-                {
-                    endRowNum = totalEntries - ((pageNumber - 1) * entriesPerPage);
-                    startRowNum = endRowNum - entriesPerPage;
-                }
-                else
-                {
-                    endRowNum = pageNumber * entriesPerPage;
-                    startRowNum = endRowNum - entriesPerPage;
-                }
+                long offset = (pageNumber - 1) * entriesPerPage;
 
                 List<DnsLogEntry> entries = new List<DnsLogEntry>(entriesPerPage);
 
                 await using (MySqlCommand command = connection.CreateCommand())
                 {
                     command.CommandText = @"
-SELECT * FROM (
-    SELECT
-        ROW_NUMBER() OVER ( 
-            ORDER BY dlid
-        ) row_num,
-        timestamp,
-        client_ip,
-        protocol,
-        response_type,
-        response_rtt,
-        rcode,
-        qname,
-        qtype,
-        qclass,
-        answer
-    FROM
-        dns_logs
-" + (string.IsNullOrEmpty(whereClause) ? "" : "WHERE " + whereClause) + @"
-) t
-WHERE 
-    row_num > @start_row_num AND row_num <= @end_row_num
-ORDER BY row_num" + (descendingOrder ? " DESC" : "");
+SELECT
+    dlid,
+    timestamp,
+    client_ip,
+    protocol,
+    response_type,
+    response_rtt,
+    rcode,
+    qname,
+    qtype,
+    qclass,
+    answer
+FROM
+    dns_logs
+" + (string.IsNullOrEmpty(whereClause) ? "" : "WHERE " + whereClause + " ") + @"
+ORDER BY dlid" + (descendingOrder ? " DESC" : "") + @"
+LIMIT @limit OFFSET @offset";
 
-                    command.Parameters.AddWithValue("@start_row_num", startRowNum);
-                    command.Parameters.AddWithValue("@end_row_num", endRowNum);
+                    command.Parameters.AddWithValue("@limit", entriesPerPage);
+                    command.Parameters.AddWithValue("@offset", offset);
 
                     if (start is not null)
                         command.Parameters.AddWithValue("@start", start);
