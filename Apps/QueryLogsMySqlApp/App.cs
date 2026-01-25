@@ -675,7 +675,7 @@ CREATE TABLE IF NOT EXISTS dns_logs
 
         public async Task<DnsLogPage> QueryLogsAsync(long pageNumber, int entriesPerPage, bool descendingOrder, DateTime? start, DateTime? end, IPAddress clientIpAddress, DnsTransportProtocol? protocol, DnsServerResponseType? responseType, DnsResponseCode? rcode, string qname, DnsResourceRecordType? qtype, DnsClass? qclass)
         {
-            if (pageNumber == 0)
+            if (pageNumber < 0)
                 pageNumber = 1;
 
             if (qname is not null)
@@ -768,13 +768,18 @@ CREATE TABLE IF NOT EXISTS dns_logs
                 if ((pageNumber > totalPages) || (pageNumber < 0))
                     pageNumber = totalPages;
 
+                if (pageNumber < 1)
+                    pageNumber = 1;
+
                 long offset = (pageNumber - 1) * entriesPerPage;
 
                 List<DnsLogEntry> entries = new List<DnsLogEntry>(entriesPerPage);
 
-                await using (MySqlCommand command = connection.CreateCommand())
+                if (totalEntries > 0)
                 {
-                    command.CommandText = @"
+                    await using (MySqlCommand command = connection.CreateCommand())
+                    {
+                        command.CommandText = @"
 SELECT
     dlid,
     timestamp,
@@ -793,69 +798,70 @@ FROM
 ORDER BY dlid" + (descendingOrder ? " DESC" : "") + @"
 LIMIT @limit OFFSET @offset";
 
-                    command.Parameters.AddWithValue("@limit", entriesPerPage);
-                    command.Parameters.AddWithValue("@offset", offset);
+                        command.Parameters.AddWithValue("@limit", entriesPerPage);
+                        command.Parameters.AddWithValue("@offset", offset);
 
-                    if (start is not null)
-                        command.Parameters.AddWithValue("@start", start);
+                        if (start is not null)
+                            command.Parameters.AddWithValue("@start", start);
 
-                    if (end is not null)
-                        command.Parameters.AddWithValue("@end", end);
+                        if (end is not null)
+                            command.Parameters.AddWithValue("@end", end);
 
-                    if (clientIpAddress is not null)
-                        command.Parameters.AddWithValue("@client_ip", clientIpAddress.ToString());
+                        if (clientIpAddress is not null)
+                            command.Parameters.AddWithValue("@client_ip", clientIpAddress.ToString());
 
-                    if (protocol is not null)
-                        command.Parameters.AddWithValue("@protocol", (byte)protocol);
+                        if (protocol is not null)
+                            command.Parameters.AddWithValue("@protocol", (byte)protocol);
 
-                    if (responseType is not null)
-                        command.Parameters.AddWithValue("@response_type", (byte)responseType);
+                        if (responseType is not null)
+                            command.Parameters.AddWithValue("@response_type", (byte)responseType);
 
-                    if (rcode is not null)
-                        command.Parameters.AddWithValue("@rcode", (byte)rcode);
+                        if (rcode is not null)
+                            command.Parameters.AddWithValue("@rcode", (byte)rcode);
 
-                    if (qname is not null)
-                        command.Parameters.AddWithValue("@qname", qname);
+                        if (qname is not null)
+                            command.Parameters.AddWithValue("@qname", qname);
 
-                    if (qtype is not null)
-                        command.Parameters.AddWithValue("@qtype", (short)qtype);
+                        if (qtype is not null)
+                            command.Parameters.AddWithValue("@qtype", (short)qtype);
 
-                    if (qclass is not null)
-                        command.Parameters.AddWithValue("@qclass", (short)qclass);
+                        if (qclass is not null)
+                            command.Parameters.AddWithValue("@qclass", (short)qclass);
 
-                    long rowNumber = descendingOrder ? totalEntries - offset : offset + 1;
+                        long rowNumber = descendingOrder ? totalEntries - offset : offset + 1;
 
-                    await using (DbDataReader reader = await command.ExecuteReaderAsync())
-                    {
-                        while (await reader.ReadAsync())
+                        await using (DbDataReader reader = await command.ExecuteReaderAsync())
                         {
-                            double? responseRtt;
+                            while (await reader.ReadAsync())
+                            {
+                                double? responseRtt;
 
-                            if (reader.IsDBNull(5))
-                                responseRtt = null;
-                            else
-                                responseRtt = reader.GetFloat(5);
+                                if (reader.IsDBNull(5))
+                                    responseRtt = null;
+                                else
+                                    responseRtt = reader.GetFloat(5);
 
-                            DnsQuestionRecord? question;
+                                DnsQuestionRecord? question;
 
-                            if (reader.IsDBNull(7))
-                                question = null;
-                            else
-                                question = new DnsQuestionRecord(reader.GetString(7), (DnsResourceRecordType)reader.GetInt16(8), (DnsClass)reader.GetInt16(9), false);
+                                if (reader.IsDBNull(7))
+                                    question = null;
+                                else
+                                    question = new DnsQuestionRecord(reader.GetString(7), (DnsResourceRecordType)reader.GetInt16(8), (DnsClass)reader.GetInt16(9), false);
 
-                            string? answer;
+                                string? answer;
 
-                            if (reader.IsDBNull(10))
-                                answer = null;
-                            else
-                                answer = reader.GetString(10);
+                                if (reader.IsDBNull(10))
+                                    answer = null;
+                                else
+                                    answer = reader.GetString(10);
 
-                            entries.Add(new DnsLogEntry(rowNumber, reader.GetDateTime(1), IPAddress.Parse(reader.GetString(2)), (DnsTransportProtocol)reader.GetByte(3), (DnsServerResponseType)reader.GetByte(4), responseRtt, (DnsResponseCode)reader.GetByte(6), question, answer));
+                                entries.Add(new DnsLogEntry(rowNumber, reader.GetDateTime(1), IPAddress.Parse(reader.GetString(2)), (DnsTransportProtocol)reader.GetByte(3), (DnsServerResponseType)reader.GetByte(4), responseRtt, (DnsResponseCode)reader.GetByte(6), question, answer));
 
-                            if (descendingOrder)
-                                rowNumber--;
-                            else
-                                rowNumber++;
+                                if (descendingOrder)
+                                    rowNumber--;
+                                else
+                                    rowNumber++;
+                            }
                         }
                     }
                 }
