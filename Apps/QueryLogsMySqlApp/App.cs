@@ -675,7 +675,7 @@ CREATE TABLE IF NOT EXISTS dns_logs
 
         public async Task<DnsLogPage> QueryLogsAsync(long pageNumber, int entriesPerPage, bool descendingOrder, DateTime? start, DateTime? end, IPAddress clientIpAddress, DnsTransportProtocol? protocol, DnsServerResponseType? responseType, DnsResponseCode? rcode, string qname, DnsResourceRecordType? qtype, DnsClass? qclass)
         {
-            if (pageNumber < 0)
+            if (pageNumber < 1)
                 pageNumber = 1;
 
             if (qname is not null)
