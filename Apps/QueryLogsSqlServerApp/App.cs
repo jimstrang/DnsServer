@@ -571,7 +571,7 @@ END
 
         public async Task<DnsLogPage> QueryLogsAsync(long pageNumber, int entriesPerPage, bool descendingOrder, DateTime? start, DateTime? end, IPAddress clientIpAddress, DnsTransportProtocol? protocol, DnsServerResponseType? responseType, DnsResponseCode? rcode, string qname, DnsResourceRecordType? qtype, DnsClass? qclass)
         {
-            if (pageNumber == 0)
+            if (pageNumber < 1)
                 pageNumber = 1;
 
             if (qname is not null)
@@ -665,50 +665,39 @@ END
                 if ((pageNumber > totalPages) || (pageNumber < 0))
                     pageNumber = totalPages;
 
-                long endRowNum;
-                long startRowNum;
+                if (pageNumber < 1)
+                    pageNumber = 1;
 
-                if (descendingOrder)
-                {
-                    endRowNum = totalEntries - ((pageNumber - 1) * entriesPerPage);
-                    startRowNum = endRowNum - entriesPerPage;
-                }
-                else
-                {
-                    endRowNum = pageNumber * entriesPerPage;
-                    startRowNum = endRowNum - entriesPerPage;
-                }
+                long offset = (pageNumber - 1) * entriesPerPage;
 
                 List<DnsLogEntry> entries = new List<DnsLogEntry>(entriesPerPage);
 
-                await using (SqlCommand command = connection.CreateCommand())
+                if (totalEntries > 0)
                 {
-                    command.CommandText = @"
-SELECT * FROM (
-    SELECT
-        ROW_NUMBER() OVER ( 
-            ORDER BY dlid
-        ) row_num,
-        timestamp,
-        client_ip,
-        protocol,
-        response_type,
-        response_rtt,
-        rcode,
-        qname,
-        qtype,
-        qclass,
-        answer
-    FROM
-        dns_logs
-" + (string.IsNullOrEmpty(whereClause) ? "" : "WHERE " + whereClause) + @"
-) t
-WHERE 
-    row_num > @start_row_num AND row_num <= @end_row_num
-ORDER BY row_num" + (descendingOrder ? " DESC" : "");
+                    await using (SqlCommand command = connection.CreateCommand())
+                    {
+                        command.CommandText = @"
+SELECT
+    dlid,
+    timestamp,
+    client_ip,
+    protocol,
+    response_type,
+    response_rtt,
+    rcode,
+    qname,
+    qtype,
+    qclass,
+    answer
+FROM
+    dns_logs
+" + (string.IsNullOrEmpty(whereClause) ? "" : "WHERE " + whereClause + " ") + @"
+ORDER BY dlid" + (descendingOrder ? " DESC" : "") + @"
+OFFSET @offset ROWS
+FETCH NEXT @limit ROWS ONLY";
 
-                    command.Parameters.AddWithValue("@start_row_num", startRowNum);
-                    command.Parameters.AddWithValue("@end_row_num", endRowNum);
+                        command.Parameters.AddWithValue("@limit", entriesPerPage);
+                        command.Parameters.AddWithValue("@offset", offset);
 
                     if (start is not null)
                         command.Parameters.AddWithValue("@start", start);
@@ -737,6 +726,8 @@ ORDER BY row_num" + (descendingOrder ? " DESC" : "");
                     if (qclass is not null)
                         command.Parameters.AddWithValue("@qclass", (ushort)qclass);
 
+                        long rowNumber = descendingOrder ? totalEntries - offset : offset + 1;
+
                     await using (SqlDataReader reader = await command.ExecuteReaderAsync())
                     {
                         while (await reader.ReadAsync())
@@ -762,9 +753,15 @@ ORDER BY row_num" + (descendingOrder ? " DESC" : "");
                             else
                                 answer = reader.GetString(10);
 
-                            entries.Add(new DnsLogEntry(reader.GetInt64(0), reader.GetDateTime(1), IPAddress.Parse(reader.GetString(2)), (DnsTransportProtocol)reader.GetByte(3), (DnsServerResponseType)reader.GetByte(4), responseRtt, (DnsResponseCode)reader.GetByte(6), question, answer));
+                            entries.Add(new DnsLogEntry(rowNumber, reader.GetDateTime(1), IPAddress.Parse(reader.GetString(2)), (DnsTransportProtocol)reader.GetByte(3), (DnsServerResponseType)reader.GetByte(4), responseRtt, (DnsResponseCode)reader.GetByte(6), question, answer));
+
+                            if (descendingOrder)
+                                rowNumber--;
+                            else
+                                rowNumber++;
                         }
                     }
+                }
                 }
 
                 return new DnsLogPage(pageNumber, totalPages, totalEntries, entries);
